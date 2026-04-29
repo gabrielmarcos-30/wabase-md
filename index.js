@@ -1,6 +1,18 @@
 const express = require("express")
 const app = express()
 
+app.get("/", (req, res) => {
+  res.send("Bot online 🚀")
+})
+
+app.listen(process.env.PORT || 3000)
+
+
+// 👇 daqui pra baixo vem o bot
+const { core } = require("./lib")
+const { default: makeWASocket } = require("@adiwajshing/baileys")const express = require("express")
+const app = express()
+
 const { default: makeWASocket, useSingleFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@adiwajshing/baileys")
 const { Boom } = require("@hapi/boom")
 
