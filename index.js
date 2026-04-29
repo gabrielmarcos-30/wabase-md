@@ -1,40 +1,65 @@
-const { core } = require('./lib')
+const express = require("express")
+const app = express()
+
 const { default: makeWASocket, useSingleFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@adiwajshing/baileys")
-const { Boom } = require("@hapi/boom");
-const { connFileName } = require("./config/configFile")
-const { state, saveState } = useSingleFileAuthState(connFileName)
-// Removido temporariamente
+const { Boom } = require("@hapi/boom")
+
+const { core } = require("./lib/core")
+
+const { state, saveState } = useSingleFileAuthState("./session.json")
+
 const MAIN_LOGGER = require("@adiwajshing/baileys/lib/Utils/logger").default
 const logger = MAIN_LOGGER.child({})
-logger.level = 'silent'
+logger.level = "silent"
 
-const startSock = async () => {
+// servidor (Render precisa disso)
+app.get("/", (req, res) => res.send("Bot online 🚀"))
+app.listen(process.env.PORT || 3000)
+
+async function startSock() {
     const { version } = await fetchLatestBaileysVersion()
-    const sock = makeWASocket({ logger, version, printQRInTerminal: true, auth: state })
-    sock.ev.on('messages.upsert', async m => await core(sock, m))
 
-    sock.ev.on('connection.update', (update) => {
+    const sock = makeWASocket({
+        logger,
+        version,
+        auth: state,
+        printQRInTerminal: false
+    })
+
+    // 🔑 Pairing code
+    if (!sock.authState.creds.registered) {
+        const phoneNumber = "SEU_NUMERO_AQUI"
+        const code = await sock.requestPairingCode(phoneNumber)
+        console.log("Código:", code)
+    }
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        try {
+            await core(sock, messages[0])
+        } catch (e) {
+            console.log("Erro:", e)
+        }
+    })
+
+    sock.ev.on("connection.update", (update) => {
         const { connection, lastDisconnect } = update
 
-        if (connection) { console.log("Connection Status: ", connection); }
+        if (connection === "close") {
+            const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
 
-        if (connection !== "close") return
+            if (reason === DisconnectReason.loggedOut) {
+                console.log("Sessão perdida, conecta de novo")
+            } else {
+                startSock()
+            }
+        }
 
-        let reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-
-        const DR = DisconnectReason
-
-        if (reason === DR.badSession) { console.log(`Sessão corrompida. Apague ${connFileName} e leia o código QR.`); sock.logout(); return }
-        if (reason === DR.connectionClosed) { console.log("Conexão encerrada. Reconectando..."); startSock(); return }
-        if (reason === DR.connectionLost) { console.log("Conexão perdida com o servidor. Tentando reconectar..."); startSock(); return }
-        if (reason === DR.connectionReplaced) { console.log("Sessão atual substituida pela nova aberta. Feche essa sessão primeiro."); sock.logout(); return }
-        if (reason === DR.loggedOut) { console.log(`Sessão encerrada pelo celular. Apague ${connFileName} e leia o código QR.`); sock.logout(); return }
-        if (reason === DR.restartRequired) { console.log("Reinio necessario. Reiniciando..."); startSock(); return }
-        if (reason === DR.timedOut) { console.log("A conexão estourou o tempo limite, Reconectando..."); startSock(); return }
-
-        sock.end(`Deu ruim: ${reason}|${lastDisconnect.error}`)
+        if (connection === "open") {
+            console.log("Bot conectado ✅")
+        }
     })
-    sock.ev.on('creds.update', saveState)
+
+    sock.ev.on("creds.update", saveState)
 }
 
 startSock()
